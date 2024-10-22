@@ -332,6 +332,42 @@ def read_points3D_text(path):
                                                point2D_idxs=point2D_idxs)
     return points3D
 
+def read_points3D_text_as_numpy(path):
+    xyzs = None
+    rgbs = None
+    errors = None
+    num_points = 0
+    with open(path, "r") as fid:
+        while True:
+            line = fid.readline()
+            if not line:
+                break
+            line = line.strip()
+            if len(line) > 0 and line[0] != "#":
+                num_points += 1
+
+    xyzs = np.empty((num_points, 3))
+    rgbs = np.empty((num_points, 3))
+    errors = np.empty((num_points, 1))
+    count = 0
+    with open(path, "r") as fid:
+        while True:
+            line = fid.readline()
+            if not line:
+                break
+            line = line.strip()
+            if len(line) > 0 and line[0] != "#":
+                elems = line.split()
+                xyz = np.array(tuple(map(float, elems[1:4])))
+                rgb = np.array(tuple(map(int, elems[4:7])))
+                error = np.array(float(elems[7]))
+                xyzs[count] = xyz
+                rgbs[count] = rgb
+                errors[count] = error
+                count += 1
+
+    return xyzs, rgbs, errors
+
 
 def read_points3D_binary(path_to_model_file):
     """

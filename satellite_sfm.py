@@ -10,6 +10,8 @@ from utils.preprocess_us3d import preprocess_us3d
 from utils.colmap_sfm_utils import init_posed_sfm, extract_camera_dict
 from utils.skew_correct import run_skew_correct
 from utils.rotation_correct import run_rotation_correct
+from utils.focal_correct import run_focal_correct
+
 from utils.colmap_read_write_model import read_model, write_model, Camera
 
 def run_sfm(scene_path, 
@@ -139,6 +141,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--scene_path', type=str, default="data/JAX_214", help='Folder containing input data.')
     parser.add_argument('--skew_correct', action='store_false')
+    parser.add_argument('--focal_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
     args = parser.parse_args()
 
@@ -162,16 +165,24 @@ if __name__ == '__main__':
         print("Start Skew Correction")
         skew_cam_path = os.path.join(args.scene_path, 'skew_correct/cameras')
         skew_img_path = os.path.join(args.scene_path, 'skew_correct/images')
-        # run_skew_correct(img_path, cam_path, skew_img_path, skew_cam_path)
+        run_skew_correct(img_path, cam_path, skew_img_path, skew_cam_path)
         cam_path = skew_cam_path
         img_path = skew_img_path
+    
+    # if args.focal_correct:
+    #     print("Start focal Correct")
+    #     focal_cam_path = os.path.join(args.scene_path, 'focal_correct/cameras')
+    #     focal_img_path = os.path.join(args.scene_path, 'focal_correct/images')
+    #     run_focal_correct(img_path, cam_path, focal_img_path, focal_cam_path)
+    #     cam_path = focal_cam_path
+    #     img_path = focal_img_path
     
     ## geometric correction
     if args.rot_correct:
         print("Start Rotation Transformation and Correction")
         rot_cam_path = os.path.join(args.scene_path, 'rot_correct/cameras')
         rot_img_path = os.path.join(args.scene_path, 'rot_correct/images')
-        # run_rotation_correct(img_path, cam_path, rot_img_path, rot_cam_path)
+        run_rotation_correct(img_path, cam_path, rot_img_path, rot_cam_path)
         cam_path = rot_cam_path
         img_path = rot_img_path
 
@@ -212,6 +223,8 @@ if __name__ == '__main__':
             width=cam.width, height=cam.height,
             params=np.array([fx,fy,cx,cy])
         )
+    if os.path.exists(sparse_path): shutil.rmtree(sparse_path)
+    os.makedirs(sparse_path, exist_ok=True)
     write_model(new_cameras, images, points, sparse_path, ".txt")
 
 

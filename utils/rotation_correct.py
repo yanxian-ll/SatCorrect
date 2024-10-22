@@ -6,50 +6,9 @@ import imageio.v2 as imageio
 import multiprocessing
 import os
 
-def read_points3D_text(path):
-    """
-    see: src/base/reconstruction.cc
-        void Reconstruction::ReadPoints3DText(const std::string& path)
-        void Reconstruction::WritePoints3DText(const std::string& path)
-    """
-    xyzs = None
-    rgbs = None
-    errors = None
-    num_points = 0
-    with open(path, "r") as fid:
-        while True:
-            line = fid.readline()
-            if not line:
-                break
-            line = line.strip()
-            if len(line) > 0 and line[0] != "#":
-                num_points += 1
-
-
-    xyzs = np.empty((num_points, 3))
-    rgbs = np.empty((num_points, 3))
-    errors = np.empty((num_points, 1))
-    count = 0
-    with open(path, "r") as fid:
-        while True:
-            line = fid.readline()
-            if not line:
-                break
-            line = line.strip()
-            if len(line) > 0 and line[0] != "#":
-                elems = line.split()
-                xyz = np.array(tuple(map(float, elems[1:4])))
-                rgb = np.array(tuple(map(int, elems[4:7])))
-                error = np.array(float(elems[7]))
-                xyzs[count] = xyz
-                rgbs[count] = rgb
-                errors[count] = error
-                count += 1
-
-    return xyzs, rgbs, errors
-
 def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop=True):
     img_src = imageio.imread(img_file)
+    orig_h, orig_w = img_src.shape[:2]
     cam_dict = json.load(open(cam_file))
     if img_src.shape[-1] == 4:
         mask = img_src[:,:,-1]
@@ -64,6 +23,8 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     if 'mask_obb' in cam_dict:
         mask_obb = np.array(cam_dict['mask_obb']).reshape((2,4))
     else:
+        mask_obb = np.array([[0, orig_w, orig_w, 0],
+                            [0, 0, orig_h, orig_h]])
         center_crop = False
         print(f"key 'mask_abb' not in the camera dict, so can't center crop, set center_crop=False")
 
@@ -92,13 +53,10 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     R_prime = R_delta @ R
     t_prime = R_delta @ t
 
-    # K_prime = np.array([[fx, 0, w/2],
-    #                     [0, fy, h/2],
-    #                     [0,  0,  1]])
-
     K_prime = np.array([[fx, 0, w/2],
                         [0, fy, h/2],
                         [0,  0,  1]])
+    ## TODO: adaptive adjust fx & fy
     
     new_K = np.eye(4)
     new_K[:3, :3] = K_prime
@@ -115,6 +73,7 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     warped_mask = cv2.warpPerspective(mask, H, (int(w), int(h)))
     warped_image = cv2.warpPerspective(img_src, H, (int(w), int(h)))
     
+    # center crop for remove margin
     if center_crop:
         bbx = np.dot(H, np.concatenate([mask_obb, np.array([[1,1,1,1]])], axis=0))
         bbx = bbx[:2,:] / bbx[2:3,:]
@@ -126,7 +85,7 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
         right = min(bbx[0,1],bbx[0,2])
         col_margin = max(int(left+0.5), int(w-right+0.5))
 
-        warped_image = warped_image[row_margin:w-row_margin, col_margin:h-col_margin, :]
+        warped_image = warped_image[row_margin:h-row_margin, col_margin:w-col_margin, :]
         cam_dict['img_size'] = [int(warped_image.shape[1]), int(warped_image.shape[0])]
         new_K[0, 2] -= col_margin
         new_K[1, 2] -= row_margin
@@ -165,7 +124,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Test")
     parser.add_argument("--cam_file", default="data/JAX_214/skew_correct/cameras/JAX_214_001_RGB.json")
     parser.add_argument("--img_file", default="data/JAX_214/skew_correct/images/JAX_214_001_RGB.png")
-    parser.add_argument("--points_file", default="data/JAX_214/preprocess/colmap_triangulate_postba/points3D.txt")
+    parser.add_argument("--points_file", default="data/JAX_214/sparse/0/points3D.txt")
     parser.add_argument("--output_path", default="./test_output")
     args = parser.parse_args()
 
@@ -174,7 +133,9 @@ if __name__ == "__main__":
     out_img_file = os.path.join(args.output_path, args.img_file.split('/')[-1])
     rotation_correct(args.cam_file, args.img_file, out_cam_file, out_img_file, True)
 
-    points, _, _  = read_points3D_text(args.points_file)
+    from colmap_read_write_model import read_points3D_text_as_numpy
+
+    points, _, _  = read_points3D_text_as_numpy(args.points_file)
     img1 = imageio.imread(args.img_file)[:,:,:3]
     cam1 = json.load(open(args.cam_file))
     img2 = imageio.imread(out_img_file)[:,:,:3]
@@ -196,8 +157,11 @@ if __name__ == "__main__":
     idx = np.random.randint(0, len(u1), num)
     u1, v1, u2, v2 = u1[idx], v1[idx], u2[idx], v2[idx]
 
+    if img1.shape[0] < img2.shape[0]:
+        img1 = np.pad(img1, ((0, img2.shape[0]-img1.shape[0]), (0, 0), (0, 0)))
+    if img1.shape[1] < img2.shape[1]:
+        img1 = np.pad(img1, ((0, 0), (0, img2.shape[1]-img1.shape[1]), (0, 0)))
     img2 = np.pad(img2, ((0, img1.shape[0]-img2.shape[0]), (0, img1.shape[1]-img2.shape[1]), (0, 0)))
-
     img = np.concatenate((img1, img2), axis=1)
     w = img1.shape[1]
 
