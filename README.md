@@ -1,6 +1,6 @@
 # SatCorrect
 
-Fllowing:
+Following:
 - (https://github.com/Kai-46/SatelliteSfM)[https://github.com/Kai-46/SatelliteSfM]
 - (https://github.com/Kai-46/ColmapForVisSat)[https://github.com/Kai-46/ColmapForVisSat]
 - (https://github.com/princeton-vl/RAFT)[https://github.com/princeton-vl/RAFT]
