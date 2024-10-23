@@ -12,7 +12,7 @@ import shutil
 import imageio
 import multiprocessing
 
-from preprocess.approximate_rpc_locally import approximate_rpc_locally
+from preprocess.approximate_rpc_locally import approximate_rpc_locally, approximate_rpc_locally_and_rectify_image
 
 
 def eastnorth_to_latlon(east, north, zone_number, hemisphere):
@@ -75,14 +75,21 @@ def read_tif_and_info(tiff_fpath):
 
 def _process_single_image(scene_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt):
     img, meta_dict = read_tif_and_info(os.path.join(scene_path, "input", f))
-    imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), img)
+    # imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), img)
+
     with open(os.path.join(output_path, 'metas', f.replace('tif', 'json')), 'w') as fp:
         json.dump(meta_dict, fp, indent=2)
-    K, W2C = approximate_rpc_locally(meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+
+    # K, W2C = approximate_rpc_locally(meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+
+    K, W2C, new_img = approximate_rpc_locally_and_rectify_image(img, meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+    imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), new_img)
+
     cam_dict = {
             'K': K.flatten().tolist(),
             'W2C': W2C.flatten().tolist(),
-            'img_size': [img.shape[1], img.shape[0]]
+            # 'img_size': [img.shape[1], img.shape[0]]
+            'img_size': [new_img.shape[1], new_img.shape[0]]
         }
     with open(os.path.join(output_path, 'cameras', f.replace('tif', 'json')), 'w') as fp:
         json.dump(cam_dict, fp, indent=2)
@@ -178,6 +185,9 @@ def preprocess_us3d(scene_path, output_path=None, max_processes=-1):
         pool.close()
         pool.join()
 
+    # for f in os.listdir(os.path.join(scene_path, "input")):
+    #     _process_single_image(scene_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+
     all_cam_dict = {}
     for f in os.listdir(os.path.join(output_path, 'cameras')):
         cam_dict = json.load(open(os.path.join(output_path, 'cameras', f)))
@@ -195,4 +205,4 @@ if __name__ == "__main__":
     parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
 
-    preprocess_us3d(args.scene_path, args.max_processes)
+    preprocess_us3d(args.scene_path)

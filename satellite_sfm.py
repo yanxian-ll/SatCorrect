@@ -12,7 +12,7 @@ from utils.skew_correct import run_skew_correct
 from utils.rotation_correct import run_rotation_correct
 from utils.focal_correct import run_focal_correct
 
-from utils.colmap_read_write_model import read_model, write_model, Camera
+from utils.colmap_read_write_model import read_model, write_model, Camera, Image, Point3D, qvec2rotmat, rotmat2qvec
 
 def run_sfm(scene_path, 
             reproj_err_threshold=[32.0, 2.0],
@@ -143,6 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--skew_correct', action='store_false')
     parser.add_argument('--focal_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
+    parser.add_argument('--scale_scene', action='store_false')
     args = parser.parse_args()
 
     ## preprocess US3D dataset
@@ -211,24 +212,64 @@ if __name__ == '__main__':
             global_ba_refine_focal_length=1,
             global_ba_refine_extrinsics=0)
 
+    if args.scale_scene:
+        enu_bbx = json.load(open(os.path.join(args.scene_path, 'preprocess/enu_bbx.json')))
+        scene_scale = np.sqrt(
+            (np.max(enu_bbx['e_minmax']) - np.min(enu_bbx['e_minmax'])) ** 2 +  \
+            (np.max(enu_bbx['n_minmax']) - np.min(enu_bbx['n_minmax'])) ** 2 +  \
+            (np.max(enu_bbx['u_minmax']) - np.min(enu_bbx['u_minmax'])) ** 2
+        )
+    else:
+        scene_scale = 1.0
+
     sparse_path = os.path.join(args.scene_path, 'sparse/0')
-    cameras, images, points = read_model(sparse_path)
+    cameras, images, points3D = read_model(sparse_path)
     sorted_image = dict(sorted(images.items(), key=lambda x:x[1].name))
-    new_cameras = {}
+    new_cameras, new_images, new_points3D = {}, {}, {}
+    list_zm, list_zM = [], []
+
+    # update point3d
+    points = np.vstack([p.xyz for i,p in points3D.items()]) / scene_scale
+    for idx, p in points3D.items():
+        new_points3D[idx] = Point3D(
+            id=p.id, xyz=p.xyz / scene_scale, rgb=p.rgb, error=p.error,
+            image_ids=p.image_ids, point2D_idxs=p.point2D_idxs
+        )
+    
     for i, (idx, img) in enumerate(sorted_image.items()):
         cam = cameras[img.camera_id]
         fx, fy, cx, cy = cam.params[:4]
+        # update camera intrinsic
         new_cameras[cam.id] = Camera(
             id=cam.id, model="PINHOLE", 
             width=cam.width, height=cam.height,
             params=np.array([fx,fy,cx,cy])
         )
+        
+        # scale scene
+        R = qvec2rotmat(img.qvec)
+        t = img.tvec.reshape((3,1)) / scene_scale
+
+        new_images[idx] = Image(
+            id=img.id, qvec=img.qvec, tvec=img.tvec / scene_scale,
+            camera_id=img.camera_id, name=img.name,
+            xys=img.xys, point3D_ids=img.point3D_ids
+        )
+
+        # compute znear and zfar
+        z = (R @ points.T + t)[-1,:]
+        list_zm.append(np.min(z))
+        list_zM.append(np.max(z))
+
+    print(f"scene_scale: {scene_scale}, znear: {min(list_zm)}, zfar: {max(list_zM)}")
+    # znear: 1042.2931434683887, zfar: 5736.7871096906265
+
     if os.path.exists(sparse_path): shutil.rmtree(sparse_path)
     os.makedirs(sparse_path, exist_ok=True)
-    write_model(new_cameras, images, points, sparse_path, ".txt")
+    write_model(new_cameras, new_images, new_points3D, sparse_path, ".txt")
 
 
-    if False:
+    if True:
         from utils.colmap_read_write_model import read_model, qvec2rotmat
 
         camera, image, points = read_model(os.path.join(args.scene_path, 'sparse/0'))

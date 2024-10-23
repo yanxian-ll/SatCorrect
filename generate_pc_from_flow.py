@@ -120,9 +120,6 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
     # compute flow
     forward_flow, backward_flow = compute_optical_flow(img1, img2, model, device)
 
-    # TODO:forward-backward consistency check
-
-
     # flow to xyz
     l_rows, l_cols = forward_flow.shape[:2]
     r_rows, r_cols = backward_flow.shape[:2]
@@ -142,6 +139,7 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
     right_cols = right_cols[mask]
     colors = colors[mask]
 
+    # forward-backward consistency check
     u_inter = RegularGridInterpolator(points=(np.linspace(0,r_rows-1, r_rows), np.linspace(0,r_cols-1, r_cols)), 
                                       values=backward_flow[:,:,0], bounds_error=False)
     v_inter = RegularGridInterpolator(points=(np.linspace(0,r_rows-1, r_rows), np.linspace(0,r_cols-1, r_cols)),
@@ -191,8 +189,36 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
     for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1]):
         points_3d.append(_triangulatePoint(x1,y1,x2,y2,P1,P2))
     xyz = np.vstack(points_3d)
+    colors = colors[mask]
 
-    return xyz, colors[mask]
+    ## add ground points for better water-recon
+    bottom_z = np.percentile(xyz[:, -1], q=5)
+    max_x, min_x = np.max(xyz[:,0]), np.min(xyz[:,0])
+    max_y, min_y = np.max(xyz[:,1]), np.min(xyz[:,1])
+    grid_size = 2
+    # print(int((max_x-min_x)//grid_size+1))
+    # print(int((max_y-min_y)//grid_size+1))
+    gridx, gridy = np.meshgrid(np.linspace(min_x, max_x, int((max_x-min_x)//grid_size+1)),
+                               np.linspace(min_y, max_y, int((max_y-min_y)//grid_size+1)))
+    x_occ = ((xyz[:,0] - min_x) // grid_size).astype(int)
+    y_occ = ((xyz[:,1] - min_y) // grid_size).astype(int)
+    grid_empty = np.ones((gridx.shape[0], gridx.shape[1]), dtype=bool)
+    grid_empty[y_occ, x_occ] = False
+
+    add_x = gridx[grid_empty]
+    add_y = gridy[grid_empty]
+    add_z = np.ones_like(add_x) * bottom_z
+    add_xyz = np.vstack([add_x, add_y, add_z]).T
+
+    uv1 = (K1[:3,:3] @ W2C1[:3,:4] @ np.concatenate([add_xyz, np.ones((add_xyz.shape[0], 1))], axis=-1).T).T
+    uv1 = (uv1[:,:2] / uv1[:,2:3]).astype(int)
+    mask = (uv1[:,1]>=0) & (uv1[:,1]<l_rows) & (uv1[:,0]>=0) & (uv1[:,0]<l_cols)
+    add_colors = img1[uv1[:,1][mask], uv1[:,0][mask]]
+    add_xyz = add_xyz[mask]
+
+    xyz = np.concatenate([xyz, add_xyz], axis=0)
+    colors = np.concatenate([colors, add_colors], axis=0)
+    return xyz, colors
 
 
 # main program to demonstrate a baseline MVS algorithm
