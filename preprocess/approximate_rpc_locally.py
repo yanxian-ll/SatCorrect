@@ -69,8 +69,7 @@ def approximate_rpc_locally(meta_dict, lat_minmax, lon_minmax, alt_minmax,
         observer_lat, observer_lon, observer_alt: float
         lat_N, lon_N, alt_N: integers
     '''
-    lat, lon, alt, col, row = _generate_samples(meta_dict, lat_minmax, lon_minmax, alt_minmax, 
-                                                           lat_N, lon_N, alt_N)
+    lat, lon, alt, col, row = _generate_samples(meta_dict, lat_minmax, lon_minmax, alt_minmax, lat_N, lon_N, alt_N)
 
     assert (observer_alt < np.min(alt_minmax))
 

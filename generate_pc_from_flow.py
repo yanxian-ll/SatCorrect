@@ -147,27 +147,27 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
     u = u_inter(np.vstack([right_rows, right_cols]).T) + right_cols
     v = v_inter(np.vstack([right_rows, right_cols]).T) + right_rows
 
-    # ## visualization test
-    # import matplotlib.pyplot as plt
-    # if img1.shape[0] < img2.shape[0]:
-    #     img1 = np.pad(img1, ((0, img2.shape[0]-img1.shape[0]), (0, 0), (0, 0)))
-    # if img1.shape[1] < img2.shape[1]:
-    #     img1 = np.pad(img1, ((0, 0), (0, img2.shape[1]-img1.shape[1]), (0, 0)))
-    # img2 = np.pad(img2, ((0, img1.shape[0]-img2.shape[0]), (0, img1.shape[1]-img2.shape[1]), (0, 0)))
-    # img = np.concatenate((img1, img2), axis=1) / 255.0
-    # W = img1.shape[1]
+    ## visualization test
+    import matplotlib.pyplot as plt
+    if img1.shape[0] < img2.shape[0]:
+        img1 = np.pad(img1, ((0, img2.shape[0]-img1.shape[0]), (0, 0), (0, 0)))
+    if img1.shape[1] < img2.shape[1]:
+        img1 = np.pad(img1, ((0, 0), (0, img2.shape[1]-img1.shape[1]), (0, 0)))
+    img2 = np.pad(img2, ((0, img1.shape[0]-img2.shape[0]), (0, img1.shape[1]-img2.shape[1]), (0, 0)))
+    img = np.concatenate((img1, img2), axis=1) / 255.0
+    W = img1.shape[1]
 
-    # plt.imshow(img)
-    # cmap = plt.get_cmap('jet')
-    # num_matches = 30
-    # idx = np.random.randint(0, len(left_rows), num_matches)
-    # for ii, i in enumerate(idx):
-    #     x0 = u[i]
-    #     y0 = v[i]
-    #     x1 = right_cols[i]
-    #     y1 = right_rows[i]
-    #     plt.plot([x0, x1 + W], [y0, y1], '-+', color=cmap(ii / (num_matches - 1)), scalex=False, scaley=False)
-    # plt.show()
+    plt.imshow(img)
+    cmap = plt.get_cmap('jet')
+    num_matches = 30
+    idx = np.random.randint(0, len(left_rows), num_matches)
+    for ii, i in enumerate(idx):
+        x0 = u[i]
+        y0 = v[i]
+        x1 = right_cols[i]
+        y1 = right_rows[i]
+        plt.plot([x0, x1 + W], [y0, y1], '-+', color=cmap(ii / (num_matches - 1)), scalex=False, scaley=False)
+    plt.show()
     
     error = np.sqrt(np.square(u - left_cols) + np.square(v - left_rows))
     mask = (error<error_threshold)
@@ -176,19 +176,21 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
     points1 = np.vstack((left_cols[mask], left_rows[mask]))
     points2 = np.vstack((right_cols[mask], right_rows[mask]))
     ## TODO:opencv crushed
-    # xyz = cv2.triangulatePoints(P1.copy(), P2.copy(), points1.copy(), points2.copy())
-    # xyz /= xyz[3]
-    # xyz = np.transpose(xyz)[:, :3] # (N,3)
+    xyz = cv2.triangulatePoints(P1.copy(), P2.copy(), points1.copy(), points2.copy())
+    xyz /= xyz[3]
+    xyz = np.transpose(xyz)[:, :3] # (N,3)
+
 
     # pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
     # results = [pool.apply_async(_triangulatePoint, args=(x1,y1,x2,y2,P1,P2)) for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1])]
     # points_3d = [result.get() for result in results]
     # xyz = np.vstack(points_3d)
 
-    points_3d = []
-    for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1]):
-        points_3d.append(_triangulatePoint(x1,y1,x2,y2,P1,P2))
-    xyz = np.vstack(points_3d)
+    # points_3d = []
+    # for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1]):
+    #     points_3d.append(_triangulatePoint(x1,y1,x2,y2,P1,P2))
+    # xyz = np.vstack(points_3d)
+    
     colors = colors[mask]
 
     ## add ground points for better water-recon
