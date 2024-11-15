@@ -50,6 +50,7 @@ def focal_correct(cam_file, img_file, out_cam_file, out_img_file, keep_img_size=
     fy, cy = K[1, 1], K[1, 2]
     
     img_src = imageio.imread(img_file)
+    orig_h, orig_w = img_src.shape[:2]
     if img_src.shape[-1] == 4:
         mask = img_src[:,:,-1]
         img_src = img_src[:,:,:3]
@@ -62,14 +63,29 @@ def focal_correct(cam_file, img_file, out_cam_file, out_img_file, keep_img_size=
         mask_obb = np.array([[0, orig_w, orig_w, 0],
                             [0, 0, orig_h, orig_h]])
 
+    if fx > fy:
+        update_fx = True
+        update_fy = False
+    else:
+        update_fy = True
+        update_fx = False
+
     # warp image
-    affine_matrix = np.array([[1., 0., 0.],
-                              [0., fx/fy, 0.]])
-    orig_h, orig_w = img_src.shape[:2]
+    if update_fy:
+        affine_matrix = np.array([[1., 0., 0.],
+                                [0., fx/fy, 0.]])
+    elif update_fx:
+        affine_matrix = np.array([[fy/fx, 0., 0.],
+                                [0., 1., 0.]])
+
     img_dst, off_set, new_mask_obb = warp_affine(img_src, affine_matrix, mask_obb)
 
     # update K
-    cy = fx/fy * cy
+    if update_fy:
+        cy = fx/fy * cy
+    elif update_fx:
+        cx = fy/fx * cx
+
     cx += off_set[0]
     cy += off_set[1]
 
@@ -86,7 +102,12 @@ def focal_correct(cam_file, img_file, out_cam_file, out_img_file, keep_img_size=
 
     new_h, new_w = img_dst.shape[:2]
     cam_dict['img_size'] = [new_w, new_h]
-    K[1, 1] = fx
+
+    if update_fy:
+        K[1, 1] = fx
+    elif update_fx:
+        K[0, 0] = fy
+
     K[0, 2] = cx
     K[1, 2] = cy
     cam_dict['K'] = K.flatten().tolist()
@@ -98,7 +119,7 @@ def focal_correct(cam_file, img_file, out_cam_file, out_img_file, keep_img_size=
     imageio.imwrite(out_img_file, img_dst)
 
 
-def run_focal_correct(input_img_path, input_cam_path, out_img_path, out_cam_path):
+def run_focal_correct(input_img_path, input_cam_path, out_img_path, out_cam_path, max_processes=-1):
     os.makedirs(out_cam_path, exist_ok=True)
     os.makedirs(out_img_path, exist_ok=True)
 
@@ -109,11 +130,17 @@ def run_focal_correct(input_img_path, input_cam_path, out_img_path, out_cam_path
     list_out_cam = [os.path.join(out_cam_path, f) for f in sorted([c.split('/')[-1] for c in list_cam])]
     list_out_img = [os.path.join(out_img_path, f) for f in sorted([c.split('/')[-1] for c in list_img])]
 
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    if max_processes <= 0:
+        max_processes = multiprocessing.cpu_count()
+    else:
+        max_processes = max_processes
+
+    with multiprocessing.Pool(processes=max_processes) as pool:
         for cam, img, out_cam, out_img in zip(list_cam, list_img, list_out_cam, list_out_img):
             pool.apply_async(focal_correct, args=(cam, img, out_cam, out_img))
         pool.close()
         pool.join()
+
 
 
 if __name__ == "__main__":
@@ -124,7 +151,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Test")
     parser.add_argument("--cam_file", default="data/JAX_214/skew_correct/cameras/JAX_214_001_RGB.json")
     parser.add_argument("--img_file", default="data/JAX_214/skew_correct/images/JAX_214_001_RGB.png")
-    parser.add_argument("--points_file", default="data/JAX_214/sparse/0/points3D.txt")
+    parser.add_argument("--points_file", default="data/JAX_214/preprocess/sparse/0/points3D.txt")
     parser.add_argument("--output_path", default="./test_output")
     args = parser.parse_args()
 
@@ -133,9 +160,13 @@ if __name__ == "__main__":
     out_img_file = os.path.join(args.output_path, args.img_file.split('/')[-1])
     focal_correct(args.cam_file, args.img_file, out_cam_file, out_img_file)
 
-    from colmap_read_write_model import read_points3D_text_as_numpy
+    from colmap_read_write_model import read_points3D_text_as_numpy, read_points3D_binary_as_numpy
 
-    points, _, _  = read_points3D_text_as_numpy(args.points_file)
+    try:
+        points, _, _  = read_points3D_text_as_numpy(args.points_file)
+    except:
+        points, _, _  = read_points3D_binary_as_numpy(args.points_file)
+
     img1 = imageio.imread(args.img_file)[:,:,:3]
     cam1 = json.load(open(args.cam_file))
     img2 = imageio.imread(out_img_file)[:,:,:3]

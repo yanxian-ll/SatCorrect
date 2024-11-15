@@ -98,7 +98,7 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     imageio.imwrite(out_img_file, warped_image)
 
 
-def run_rotation_correct(input_img_path, input_cam_path, out_img_path, out_cam_path):
+def run_rotation_correct(input_img_path, input_cam_path, out_img_path, out_cam_path, max_processes=-1):
     os.makedirs(out_cam_path, exist_ok=True)
     os.makedirs(out_img_path, exist_ok=True)
 
@@ -109,7 +109,12 @@ def run_rotation_correct(input_img_path, input_cam_path, out_img_path, out_cam_p
     list_out_cam = [os.path.join(out_cam_path, f) for f in sorted([c.split('/')[-1] for c in list_cam])]
     list_out_img = [os.path.join(out_img_path, f) for f in sorted([c.split('/')[-1] for c in list_img])]
 
-    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    if max_processes <= 0:
+        max_processes = multiprocessing.cpu_count()
+    else:
+        max_processes = max_processes
+
+    with multiprocessing.Pool(processes=max_processes) as pool:
         for cam, img, out_cam, out_img in zip(list_cam, list_img, list_out_cam, list_out_img):
             pool.apply_async(rotation_correct, args=(cam, img, out_cam, out_img))
         pool.close()
@@ -133,9 +138,13 @@ if __name__ == "__main__":
     out_img_file = os.path.join(args.output_path, args.img_file.split('/')[-1])
     rotation_correct(args.cam_file, args.img_file, out_cam_file, out_img_file, True)
 
-    from colmap_read_write_model import read_points3D_text_as_numpy
+    from colmap_read_write_model import read_points3D_text_as_numpy, read_points3D_binary_as_numpy
 
-    points, _, _  = read_points3D_text_as_numpy(args.points_file)
+    try:
+        points, _, _  = read_points3D_text_as_numpy(args.points_file)
+    except:
+        points, _, _  = read_points3D_binary_as_numpy(args.points_file)
+
     img1 = imageio.imread(args.img_file)[:,:,:3]
     cam1 = json.load(open(args.cam_file))
     img2 = imageio.imread(out_img_file)[:,:,:3]

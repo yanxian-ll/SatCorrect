@@ -5,6 +5,7 @@ import numpy as np
 import logging
 from collections import Iterable
 import shutil
+import multiprocessing
 
 from utils.preprocess_us3d import preprocess_us3d
 from utils.colmap_sfm_utils import init_posed_sfm, extract_camera_dict
@@ -141,76 +142,82 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--scene_path', type=str, default="data/JAX_214", help='Folder containing input data.')
     parser.add_argument('--skew_correct', action='store_false')
-    parser.add_argument('--focal_correct', action='store_false')
-    parser.add_argument('--rot_correct', action='store_false')
-    parser.add_argument('--scale_scene', action='store_false')
+    parser.add_argument('--focal_correct', action='store_false', default=False)
+    parser.add_argument('--rot_correct', action='store_false', default=False)
+    parser.add_argument('--scale_scene', action='store_false', default=False)
+    parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
 
-    # ## preprocess US3D dataset
-    # preprocess_us3d(args.scene_path, os.path.join(args.scene_path, 'preprocess'))
+    if args.max_processes <= 0:
+        max_processes = multiprocessing.cpu_count()
+    else:
+        max_processes = args.max_processes
 
-    # ## First time SFM
-    # run_sfm(os.path.join(args.scene_path, 'preprocess'), 
-    #         reproj_err_threshold=[32.0, 2.0], 
-    #         mapper_ba_refine_principal_point=0,
-    #         mapper_ba_refine_focal_length=0,
-    #         global_ba_refine_principal_point=1,
-    #         global_ba_refine_focal_length=0,
-    #         global_ba_refine_extrinsics=0)
+    ## preprocess US3D dataset
+    preprocess_us3d(args.scene_path, os.path.join(args.scene_path, 'preprocess'), max_processes=max_processes)
 
-    # cam_path = os.path.join(args.scene_path, 'preprocess/cameras')
-    # img_path = os.path.join(args.scene_path, 'preprocess/images')
+    ## First time SFM
+    run_sfm(os.path.join(args.scene_path, 'preprocess'), 
+            reproj_err_threshold=[32.0, 2.0], 
+            mapper_ba_refine_principal_point=0,
+            mapper_ba_refine_focal_length=0,
+            global_ba_refine_principal_point=1,
+            global_ba_refine_focal_length=0,
+            global_ba_refine_extrinsics=0)
 
-    # ## skew correction
-    # if args.skew_correct or args.rot_correct:
-    #     print("Start Skew Correction")
-    #     skew_cam_path = os.path.join(args.scene_path, 'skew_correct/cameras')
-    #     skew_img_path = os.path.join(args.scene_path, 'skew_correct/images')
-    #     run_skew_correct(img_path, cam_path, skew_img_path, skew_cam_path)
-    #     cam_path = skew_cam_path
-    #     img_path = skew_img_path
-    
-    # # if args.focal_correct:
-    # #     print("Start focal Correct")
-    # #     focal_cam_path = os.path.join(args.scene_path, 'focal_correct/cameras')
-    # #     focal_img_path = os.path.join(args.scene_path, 'focal_correct/images')
-    # #     run_focal_correct(img_path, cam_path, focal_img_path, focal_cam_path)
-    # #     cam_path = focal_cam_path
-    # #     img_path = focal_img_path
-    
-    # ## geometric correction
-    # if args.rot_correct:
-    #     print("Start Rotation Transformation and Correction")
-    #     rot_cam_path = os.path.join(args.scene_path, 'rot_correct/cameras')
-    #     rot_img_path = os.path.join(args.scene_path, 'rot_correct/images')
-    #     run_rotation_correct(img_path, cam_path, rot_img_path, rot_cam_path)
-    #     cam_path = rot_cam_path
-    #     img_path = rot_img_path
+    cam_path = os.path.join(args.scene_path, 'preprocess/cameras')
+    img_path = os.path.join(args.scene_path, 'preprocess/images')
 
-    # # Update Cameras and images
-    # all_cam_dict = {}
-    # for f in os.listdir(cam_path):
-    #     cam_dict = json.load(open(os.path.join(cam_path, f)))
-    #     all_cam_dict[f.split('.')[0]] = cam_dict
-    # with open(os.path.join(args.scene_path, 'cam_dict.json'), 'w') as fp:
-    #     json.dump(all_cam_dict, fp, indent=2)
+    ## skew correction
+    if args.skew_correct or args.rot_correct:
+        print("Start Skew Correction")
+        skew_cam_path = os.path.join(args.scene_path, 'skew_correct/cameras')
+        skew_img_path = os.path.join(args.scene_path, 'skew_correct/images')
+        run_skew_correct(img_path, cam_path, skew_img_path, skew_cam_path, max_processes=max_processes)
+        cam_path = skew_cam_path
+        img_path = skew_img_path
     
-    # image_path = os.path.join(args.scene_path, 'images')
-    # if os.path.exists(image_path): shutil.rmtree(image_path)
-    # os.makedirs(image_path, exist_ok=True)
-    # for img in os.listdir(img_path):
-    #     orig_path = os.path.join(img_path, img)
-    #     new_path = os.path.join(image_path, img)
-    #     shutil.copy(orig_path, new_path)
+    if args.focal_correct:
+        print("Start focal Correct")
+        focal_cam_path = os.path.join(args.scene_path, 'focal_correct/cameras')
+        focal_img_path = os.path.join(args.scene_path, 'focal_correct/images')
+        run_focal_correct(img_path, cam_path, focal_img_path, focal_cam_path, max_processes=max_processes)
+        cam_path = focal_cam_path
+        img_path = focal_img_path
     
-    # # Run Sceond-time SFM
-    # run_sfm(args.scene_path, 
-    #         reproj_err_threshold=[2.0, 1.0],
-    #         mapper_ba_refine_principal_point=0,
-    #         mapper_ba_refine_focal_length=1,
-    #         global_ba_refine_principal_point=0,
-    #         global_ba_refine_focal_length=1,
-    #         global_ba_refine_extrinsics=0)
+    ## geometric correction
+    if args.rot_correct:
+        print("Start Rotation Transformation and Correction")
+        rot_cam_path = os.path.join(args.scene_path, 'rot_correct/cameras')
+        rot_img_path = os.path.join(args.scene_path, 'rot_correct/images')
+        run_rotation_correct(img_path, cam_path, rot_img_path, rot_cam_path, max_processes=max_processes)
+        cam_path = rot_cam_path
+        img_path = rot_img_path
+
+    # Update Cameras and images
+    all_cam_dict = {}
+    for f in os.listdir(cam_path):
+        cam_dict = json.load(open(os.path.join(cam_path, f)))
+        all_cam_dict[f.split('.')[0]] = cam_dict
+    with open(os.path.join(args.scene_path, 'cam_dict.json'), 'w') as fp:
+        json.dump(all_cam_dict, fp, indent=2)
+    
+    image_path = os.path.join(args.scene_path, 'images')
+    if os.path.exists(image_path): shutil.rmtree(image_path)
+    os.makedirs(image_path, exist_ok=True)
+    for img in os.listdir(img_path):
+        orig_path = os.path.join(img_path, img)
+        new_path = os.path.join(image_path, img)
+        shutil.copy(orig_path, new_path)
+    
+    # Run Sceond-time SFM
+    run_sfm(args.scene_path, 
+            reproj_err_threshold=[2.0, 1.0],
+            mapper_ba_refine_principal_point=0,
+            mapper_ba_refine_focal_length=1,
+            global_ba_refine_principal_point=0,
+            global_ba_refine_focal_length=1,
+            global_ba_refine_extrinsics=0)
 
     if args.scale_scene:
         enu_bbx = json.load(open(os.path.join(args.scene_path, 'preprocess/enu_bbx.json')))
@@ -262,7 +269,6 @@ if __name__ == '__main__':
         list_zM.append(np.max(z))
 
     print(f"scene_scale: {scene_scale}, znear: {min(list_zm)}, zfar: {max(list_zM)}")
-    # znear: 1042.2931434683887, zfar: 5736.7871096906265
 
     if os.path.exists(sparse_path): shutil.rmtree(sparse_path)
     os.makedirs(sparse_path, exist_ok=True)

@@ -175,21 +175,20 @@ def optical_flow_to_xyz(img1_path, img2_path, cam1_path, cam2_path, model, devic
 
     points1 = np.vstack((left_cols[mask], left_rows[mask]))
     points2 = np.vstack((right_cols[mask], right_rows[mask]))
-    ## TODO:opencv crushed
-    xyz = cv2.triangulatePoints(P1.copy(), P2.copy(), points1.copy(), points2.copy())
-    xyz /= xyz[3]
-    xyz = np.transpose(xyz)[:, :3] # (N,3)
+    # ## TODO:opencv crushed
+    # xyz = cv2.triangulatePoints(P1.copy(), P2.copy(), points1.copy(), points2.copy())
+    # xyz /= xyz[3]
+    # xyz = np.transpose(xyz)[:, :3] # (N,3)
 
+    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+    results = [pool.apply_async(_triangulatePoint, args=(x1,y1,x2,y2,P1,P2)) for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1])]
+    points_3d = [result.get() for result in results]
+    xyz = np.vstack(points_3d)
 
-    # pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-    # results = [pool.apply_async(_triangulatePoint, args=(x1,y1,x2,y2,P1,P2)) for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1])]
-    # points_3d = [result.get() for result in results]
-    # xyz = np.vstack(points_3d)
-
-    # points_3d = []
-    # for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1]):
-    #     points_3d.append(_triangulatePoint(x1,y1,x2,y2,P1,P2))
-    # xyz = np.vstack(points_3d)
+    points_3d = []
+    for x1,y1,x2,y2 in zip(points1[0], points1[1], points2[0], points2[1]):
+        points_3d.append(_triangulatePoint(x1,y1,x2,y2,P1,P2))
+    xyz = np.vstack(points_3d)
     
     colors = colors[mask]
 
@@ -272,24 +271,39 @@ if __name__ == "__main__":
         convergence = []
         distances = []
     
-    for i in range(len(image_files) - 1):
-        for j in range(i + 1, len(image_files)):
-            # pair = [image_files[i], image_files[j]]
-            pair = [i, j]
-            pairs.append(pair)
-            # # get convergence angle
-            # d = convergence_angle(azimuths[i], azimuths[j], elevations[i], elevations[j])
-            # convergence.append(d)
-            # get time distance in months
+    # for i in range(len(image_files) - 1):
+    #     for j in range(i + 1, len(image_files)):
+    #         # pair = [image_files[i], image_files[j]]
+    #         pair = [i, j]
+    #         pairs.append(pair)
+    #         # # get convergence angle
+    #         # d = convergence_angle(azimuths[i], azimuths[j], elevations[i], elevations[j])
+    #         # convergence.append(d)
+    #         # get time distance in months
+    #         dist = abs(months[i] - months[j])
+    #         dist = min(dist, 12 - dist)
+    #         distances.append(dist)
+
+    # distances = np.asarray(distances)
+    # indices = distances.argsort()
+    # pairs = [pairs[i] for i in indices if i < args.max_pairs]
+    # npairs = len(pairs)
+    # print('Number of pairs = ', npairs)
+
+    for i in range(len(image_files)):
+        min_dist = 12
+        idx = -1
+        for j in range(len(image_files)):
+            if i==j: continue
             dist = abs(months[i] - months[j])
             dist = min(dist, 12 - dist)
-            distances.append(dist)
-
-    distances = np.asarray(distances)
-    indices = distances.argsort()
-    pairs = [pairs[i] for i in indices if i < args.max_pairs]
+            if dist < min_dist: 
+                min_dist=dist
+                idx = j
+        pairs.append([i, idx])
     npairs = len(pairs)
-    print('Number of pairs = ', npairs)
+    print(f'Number of pairs = {npairs}, num images = {len(image_files)}')
+
 
     # process all pairs and save XYZ files in output folder
     for i in range(npairs):
