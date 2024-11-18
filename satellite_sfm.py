@@ -140,10 +140,10 @@ def run_sfm(scene_path,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--scene_path', type=str, default="data/JAX_214", help='Folder containing input data.')
+    parser.add_argument('--scene_path', type=str, default="data/JAX_214_test", help='Folder containing input data.')
     parser.add_argument('--skew_correct', action='store_false')
-    parser.add_argument('--focal_correct', action='store_false', default=False)
-    parser.add_argument('--rot_correct', action='store_false', default=False)
+    parser.add_argument('--focal_correct', action='store_false')
+    parser.add_argument('--rot_correct', action='store_false')
     parser.add_argument('--scale_scene', action='store_false', default=False)
     parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
