@@ -27,6 +27,7 @@ scene/
 ├── scene_DSM.txt
 ...
 
+```
 
 ## Output Structure
 
@@ -41,3 +42,4 @@ scene/
 │   ├── 0/...
 ...
 
+```
