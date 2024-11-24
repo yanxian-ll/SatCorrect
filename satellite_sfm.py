@@ -70,7 +70,7 @@ def run_sfm(scene_path,
         logging.error(f"Feature matching failed with code {exit_code}. Exiting.")
         exit(exit_code)
     
-    os.makedirs(os.path.join(scene_path, 'sparse/0'), exist_ok=True)
+    os.makedirs(os.path.join(scene_path, 'sparse/base'), exist_ok=True)
 
     if not isinstance(reproj_err_threshold, Iterable):
         reproj_err_threshold = [reproj_err_threshold]
@@ -80,15 +80,15 @@ def run_sfm(scene_path,
         init_posed_sfm(
             db_file=os.path.join(scene_path, 'database.db'),
             cam_dict_file=os.path.join(scene_path, 'cam_dict.json'),
-            out_dir=os.path.join(scene_path, 'sparse/0')
+            out_dir=os.path.join(scene_path, 'sparse/base')
         )
     
         ## triangulate
         point_triangulator_cmd = f"{COLMAP_BIN} point_triangulator \
             --database_path {os.path.join(remote_scene_path, 'database.db')} \
             --image_path {os.path.join(remote_scene_path, 'images')} \
-            --input_path {os.path.join(remote_scene_path, 'sparse/0')} \
-            --output_path {os.path.join(remote_scene_path, 'sparse/0')} \
+            --input_path {os.path.join(remote_scene_path, 'sparse/base')} \
+            --output_path {os.path.join(remote_scene_path, 'sparse/base')} \
             --Mapper.filter_min_tri_angle 4.99 \
             --Mapper.init_max_forward_motion 1e20 \
             --Mapper.tri_min_angle 5.00 \
@@ -114,8 +114,8 @@ def run_sfm(scene_path,
         ## global bundle adjustment
         # one meter is roughly three pixels, we should square it
         global_ba_cmd = f"{COLMAP_BIN} bundle_adjuster \
-            --input_path {os.path.join(remote_scene_path, 'sparse/0')} \
-            --output_path {os.path.join(remote_scene_path, 'sparse/0')} \
+            --input_path {os.path.join(remote_scene_path, 'sparse/base')} \
+            --output_path {os.path.join(remote_scene_path, 'sparse/base')} \
             --BundleAdjustment.max_num_iterations 5000 \
             --BundleAdjustment.refine_focal_length {global_ba_refine_focal_length} \
             --BundleAdjustment.refine_principal_point {global_ba_refine_principal_point} \
@@ -133,7 +133,7 @@ def run_sfm(scene_path,
             exit(exit_code)
 
         ## update camera dict
-        cam_dict_adjusted = extract_camera_dict(os.path.join(scene_path, 'sparse/0'))
+        cam_dict_adjusted = extract_camera_dict(os.path.join(scene_path, 'sparse/base'))
         with open(os.path.join(scene_path, 'cam_dict.json'), 'w') as fp:
             json.dump(cam_dict_adjusted, fp, indent=2)
         
@@ -144,7 +144,7 @@ if __name__ == '__main__':
     parser.add_argument('--skew_correct', action='store_false')
     parser.add_argument('--focal_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
-    parser.add_argument('--scale_scene', action='store_false', default=False)
+    parser.add_argument('--scale_scene', action='store_false')
     parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
 
@@ -219,6 +219,12 @@ if __name__ == '__main__':
             global_ba_refine_focal_length=1,
             global_ba_refine_extrinsics=0)
 
+    # read models
+    cameras, images, points3D = read_model(os.path.join(args.scene_path, 'sparse/base'))
+    sorted_image = dict(sorted(images.items(), key=lambda x:x[1].name))
+    new_cameras, new_images, new_points3D = {}, {}, {}
+    list_zm, list_zM = [], []
+
     if args.scale_scene:
         enu_bbx = json.load(open(os.path.join(args.scene_path, 'preprocess/enu_bbx.json')))
         scene_scale = np.sqrt(
@@ -228,12 +234,6 @@ if __name__ == '__main__':
         )
     else:
         scene_scale = 1.0
-
-    sparse_path = os.path.join(args.scene_path, 'sparse/0')
-    cameras, images, points3D = read_model(sparse_path)
-    sorted_image = dict(sorted(images.items(), key=lambda x:x[1].name))
-    new_cameras, new_images, new_points3D = {}, {}, {}
-    list_zm, list_zM = [], []
 
     # update point3d
     points = np.vstack([p.xyz for i,p in points3D.items()]) / scene_scale
@@ -270,6 +270,7 @@ if __name__ == '__main__':
 
     print(f"scene_scale: {scene_scale}, znear: {min(list_zm)}, zfar: {max(list_zM)}")
 
+    sparse_path = os.path.join(args.scene_path, 'sparse/0')
     if os.path.exists(sparse_path): shutil.rmtree(sparse_path)
     os.makedirs(sparse_path, exist_ok=True)
     write_model(new_cameras, new_images, new_points3D, sparse_path, ".bin")
