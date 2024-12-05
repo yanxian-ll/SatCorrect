@@ -11,6 +11,8 @@ from osgeo import gdal
 import shutil
 import imageio
 import multiprocessing
+import rasterio
+import rpcm
 
 from preprocess.approximate_rpc_locally import approximate_rpc_locally, approximate_rpc_locally_and_rectify_image
 
@@ -73,30 +75,116 @@ def read_tif_and_info(tiff_fpath):
     return img, meta_dict
 
 
-def _process_single_image(scene_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt):
-    img, meta_dict = read_tif_and_info(os.path.join(scene_path, "input", f))
-    # imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), img)
+def _process_single_image(image_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt):
+    img, meta_dict = read_tif_and_info(os.path.join(image_path, f))
 
     with open(os.path.join(output_path, 'metas', f.replace('tif', 'json')), 'w') as fp:
         json.dump(meta_dict, fp, indent=2)
 
-    # K, W2C = approximate_rpc_locally(meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
-
-    K, W2C, new_img = approximate_rpc_locally_and_rectify_image(img, meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+    K, W2C = approximate_rpc_locally(meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+    new_img = img
     imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), new_img)
+
+    # K, W2C, new_img = approximate_rpc_locally_and_rectify_image(img, meta_dict, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
+    # imageio.imwrite(os.path.join(output_path, 'images', f.replace('tif', 'png')), new_img)
 
     cam_dict = {
             'K': K.flatten().tolist(),
             'W2C': W2C.flatten().tolist(),
-            # 'img_size': [img.shape[1], img.shape[0]]
             'img_size': [new_img.shape[1], new_img.shape[0]]
         }
     with open(os.path.join(output_path, 'cameras', f.replace('tif', 'json')), 'w') as fp:
         json.dump(cam_dict, fp, indent=2)
 
 
-def preprocess_us3d(scene_path, output_path=None, max_processes=-1):    
+def geojson_polygon(coords_array):
+    """
+    define a geojson polygon from a Nx2 numpy array with N 2d coordinates delimiting a boundary
+    """
+    from shapely.geometry import Polygon
+
+    # first attempt to construct the polygon, assuming the input coords_array are ordered
+    # the centroid is computed using shapely.geometry.Polygon.centroid
+    # taking the mean is easier but does not handle different densities of points in the edges
+    pp = coords_array.tolist()
+    poly = Polygon(pp)
+    x_c, y_c = np.array(poly.centroid.xy).ravel()
+
+    # check that the polygon is valid, i.e. that non of its segments intersect
+    # if the polygon is not valid, then coords_array was not ordered and we have to do it
+    # a possible fix is to sort points by polar angle using the centroid (anti-clockwise order)
+    if not poly.is_valid:
+        pp.sort(key=lambda p: np.arctan2(p[0] - x_c, p[1] - y_c))
+
+    # construct the geojson
+    geojson_polygon = {"coordinates": [pp], "type": "Polygon"}
+    geojson_polygon["center"] = [x_c, y_c]
+    return geojson_polygon
+
+def _crop_geotiff_lonlat_aoi(image_path, f, output_path, lonlat_aoi):
+    geotiff_path = os.path.join(image_path, f)
+    with rasterio.open(geotiff_path, 'r') as src:
+        profile = src.profile
+        tags = src.tags()
+    crop, x, y = rpcm.utils.crop_aoi(geotiff_path, lonlat_aoi)
+    rpc = rpcm.rpc_from_geotiff(geotiff_path)
+
+    rpc.row_offset -= y
+    rpc.col_offset -= x
+
+    not_pan = len(crop.shape) > 2
+    if not_pan:
+        profile["height"] = crop.shape[1]
+        profile["width"] = crop.shape[2]
+    else:
+        profile["height"] = crop.shape[0]
+        profile["width"] = crop.shape[1]
+        profile["count"] = 1
+
+    out_geotiff_path = os.path.join(output_path, f)
+    with rasterio.open(out_geotiff_path, 'w', **profile) as dst:
+        if not_pan:
+            dst.write(crop)
+        else:
+            dst.write(crop, 1)
+        dst.update_tags(**tags)
+        dst.update_tags(ns='RPC', **rpc.to_geotiff_dict())
+
+
+def run_center_crop(image_path, output_path, easting_range, northing_range, zone_number, hemisphere, max_processes=-1, margin=25):
+    if max_processes <= 0:
+        max_processes = multiprocessing.cpu_count()
+    else:
+        max_processes = max_processes
+    
+    # gt dsm bbx
+    utm_e_s, utm_e_e = easting_range
+    utm_n_s, utm_n_e = northing_range
+    
+    utm_e_s, utm_e_e = utm_e_s-margin, utm_e_e+margin
+    utm_n_s, utm_n_e = utm_n_s+margin, utm_n_e-margin
+
+    easts = [utm_e_s, utm_e_s, utm_e_e, utm_e_e, utm_e_s]
+    norths = [utm_n_s, utm_n_e, utm_n_e, utm_n_s, utm_n_s]
+    lats, lons = eastnorth_to_latlon(easts, norths, zone_number, hemisphere=hemisphere)
+    lonlat_bbx = geojson_polygon(np.vstack((lons, lats)).T)
+
+    # crop
+    os.makedirs(output_path, exist_ok=True)
+    with multiprocessing.Pool(processes=max_processes) as pool:
+        for f in os.listdir(image_path):
+            pool.apply_async(_crop_geotiff_lonlat_aoi, args=(image_path, f, output_path, lonlat_bbx))
+        pool.close()
+        pool.join()
+
+
+def preprocess_us3d(scene_path, output_path=None, center_crop=False, max_processes=-1):    
     assert os.path.exists(os.path.join(scene_path, 'input')), "input image path not exists"
+
+    if max_processes <= 0:
+        max_processes = multiprocessing.cpu_count()
+    else:
+        max_processes = max_processes
 
     bbox_file = [os.path.join(scene_path, f) for f in os.listdir(scene_path) if f.endswith('_DSM.txt')][0]
     dsm_file = [os.path.join(scene_path, f) for f in os.listdir(scene_path) if f.endswith('_DSM.tif')][0]
@@ -135,12 +223,24 @@ def preprocess_us3d(scene_path, output_path=None, max_processes=-1):
     ENU_alt = alt_min - 10.0
 
     ## transform dsm to point-cloud in ENU-coordinate
-    dsm = cv2.resize(dsm, (2*dsm.shape[1], 2*dsm.shape[0]), interpolation=cv2.INTER_NEAREST)   # densify lifted point cloud
+    # dsm = cv2.resize(dsm, (2*dsm.shape[1], 2*dsm.shape[0]), interpolation=cv2.INTER_NEAREST)   # densify lifted point cloud
     utm_e, utm_n = np.meshgrid(np.linspace(ul_utm_e, ul_utm_e+site_width, dsm.shape[1]),
                                np.linspace(ul_utm_n, ul_utm_n-site_height, dsm.shape[0]))
     utm_e = utm_e.reshape((-1))
     utm_n = utm_n.reshape((-1))
     dsm = dsm.reshape((-1))
+
+    ## center crop
+    if center_crop:
+        run_center_crop(image_path=os.path.join(scene_path, 'input'),
+                        output_path=os.path.join(output_path, 'crops'),
+                        easting_range=(ul_utm_e, ul_utm_e+site_width),
+                        northing_range=(ul_utm_n, ul_utm_n-site_height),
+                        zone_number=zone_number, hemisphere=hemisphere, 
+                        max_processes=max_processes)
+        image_path = os.path.join(output_path, 'crops')
+    else:
+        image_path = os.path.join(scene_path, 'input')
 
     lat, lon = eastnorth_to_latlon(utm_e, utm_n, zone_number=zone_number, hemisphere=hemisphere)
     enu_e, enu_n, enu_u = latlonalt_to_enu(lat, lon, dsm, ENU_lat, ENU_lon, ENU_alt)
@@ -169,24 +269,28 @@ def preprocess_us3d(scene_path, output_path=None, max_processes=-1):
     el = PlyElement.describe(elements, 'vertex')
     PlyData([el]).write(os.path.join(output_path, "point_cloud_DSM.ply"))
 
+    with rasterio.open(dsm_file, "r") as f:
+        profile = f.profile
+    
+    with rasterio.open(os.path.join(output_path, "enu_DSM.ply"),  "w", **profile) as f:
+        enu_dsm = enu_u.reshape(pixels, pixels)
+        f.write(enu_dsm, 1)
+    
+    with open(os.path.join(output_path, "enu_DSM.txt"), 'w') as f:
+        min_e = np.min(enu_e)
+        max_n = np.max(enu_n)
+        f.write(f"{min_e}\n{max_n}\n{pixels}\n{gsd}")
+
     ## init
     os.makedirs(os.path.join(output_path, 'metas'), exist_ok=True)
     os.makedirs(os.path.join(output_path, 'cameras'), exist_ok=True)
     os.makedirs(os.path.join(output_path, 'images'), exist_ok=True)
 
-    if max_processes <= 0:
-        max_processes = multiprocessing.cpu_count()
-    else:
-        max_processes = max_processes
-
     with multiprocessing.Pool(processes=max_processes) as pool:
-        for f in os.listdir(os.path.join(scene_path, "input")):
-            pool.apply_async(_process_single_image, args=(scene_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt))
+        for f in os.listdir(image_path):
+            pool.apply_async(_process_single_image, args=(image_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt))
         pool.close()
         pool.join()
-
-    # for f in os.listdir(os.path.join(scene_path, "input")):
-    #     _process_single_image(scene_path, f, output_path, lat_minmax, lon_minmax, alt_minmax, ENU_lat, ENU_lon, ENU_alt)
 
     all_cam_dict = {}
     for f in os.listdir(os.path.join(output_path, 'cameras')):

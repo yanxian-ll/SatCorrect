@@ -63,7 +63,8 @@ def focal_correct(cam_file, img_file, out_cam_file, out_img_file, keep_img_size=
         mask_obb = np.array([[0, orig_w, orig_w, 0],
                             [0, 0, orig_h, orig_h]])
 
-    if fx > fy:
+    # if fx > fy:
+    if fx < fy:
         update_fx = True
         update_fy = False
     else:

@@ -136,15 +136,77 @@ def run_sfm(scene_path,
         cam_dict_adjusted = extract_camera_dict(os.path.join(scene_path, 'sparse/base'))
         with open(os.path.join(scene_path, 'cam_dict.json'), 'w') as fp:
             json.dump(cam_dict_adjusted, fp, indent=2)
+
+
+def visualize_correspondence(images, cameras, points):
+    images = [v for k,v in images.items()]
+    points = np.vstack([p.xyz for i,p in points.items()])
+    
+    first_idx = np.random.randint(0, len(images))
+    img1 = images.pop(first_idx)
+    R1 = qvec2rotmat(img1.qvec)
+    t1 = img1.tvec.reshape((3,1))
+    cam1 = cameras[img1.camera_id]
+    K1 = np.array([
+            [cam1.params[0], 0, cam1.params[2]],
+            [0, cam1.params[1], cam1.params[3]],
+            [0, 0, 1]])
+
+    second_idx = np.random.randint(0, len(images))
+    img2 = images[second_idx]
+    R2 = qvec2rotmat(img2.qvec)
+    t2 = img2.tvec.reshape((3,1))
+    cam2 = cameras[img2.camera_id]
+    K2 = np.array([
+            [cam2.params[0], 0, cam2.params[2]],
+            [0, cam2.params[1], cam2.params[3]],
+            [0, 0, 1]])
         
+    import imageio.v2 as imageio
+    img1 = imageio.imread(os.path.join(args.scene_path, 'images', img1.name))[:,:,:3]
+    img2 = imageio.imread(os.path.join(args.scene_path, 'images', img2.name))[:,:,:3]
+
+    X_cam = (R1 @ points.T + t1)  #(3,N)
+    uv = K1 @ X_cam
+    u1, v1 = uv[0,:]/uv[2,:], uv[1,:]/uv[2,:]
+
+    X_cam = (R2 @ points.T + t2)
+    uv = K2 @ X_cam
+    u2, v2 = uv[0,:]/uv[2,:], uv[1,:]/uv[2,:]
+
+    num = 50
+    idx = np.random.randint(0, len(u1), num)
+    u1, v1, u2, v2 = u1[idx], v1[idx], u2[idx], v2[idx]
+
+    if img1.shape[0] < img2.shape[0]:
+        img1 = np.pad(img1, ((0, img2.shape[0]-img1.shape[0]), (0, 0), (0, 0)))
+    if img1.shape[1] < img2.shape[1]:
+        img1 = np.pad(img1, ((0, 0), (0, img2.shape[1]-img1.shape[1]), (0, 0)))
+
+    img2 = np.pad(img2, ((0, img1.shape[0]-img2.shape[0]), (0, img1.shape[1]-img2.shape[1]), (0, 0)))
+    img = np.concatenate((img1, img2), axis=1)
+    w = img1.shape[1]
+
+    import matplotlib.pyplot as plt
+    plt.figure()
+    plt.imshow(img)
+    cmap = plt.get_cmap('jet')
+    for i in range(num):
+        x1 = u1[i]
+        y1 = v1[i]
+        x2 = u2[i]
+        y2 = v2[i]
+        plt.plot([x1, x2 + w], [y1, y2], '-+', color=cmap(i / (num - 1)), scalex=False, scaley=False)
+    plt.show()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--scene_path', type=str, default="data/JAX_214_test", help='Folder containing input data.')
+    parser.add_argument('--scene_path', type=str, default="data/JAX_004", help='Folder containing input data.')
+    parser.add_argument('--center_crop', action='store_false')
     parser.add_argument('--skew_correct', action='store_false')
     parser.add_argument('--focal_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
-    parser.add_argument('--scale_scene', action='store_false')
     parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
 
@@ -152,18 +214,37 @@ if __name__ == '__main__':
         max_processes = multiprocessing.cpu_count()
     else:
         max_processes = args.max_processes
+    
+
+    if True:
+        from utils.colmap_read_write_model import read_model, qvec2rotmat
+        cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/0'))
+        visualize_correspondence(images, cameras, points)
+
+    for f in os.listdir(args.scene_path):
+        if f=='input' or f.endswith('_CLS.tif') or f.endswith('_DSM.tif') or f.endswith('_DSM.txt'):
+            continue
+        if os.path.isfile(os.path.join(args.scene_path, f)):
+            os.remove(os.path.join(args.scene_path, f))
+        if os.path.isdir(os.path.join(args.scene_path, f)):
+            shutil.rmtree(os.path.join(args.scene_path, f))
 
     ## preprocess US3D dataset
-    preprocess_us3d(args.scene_path, os.path.join(args.scene_path, 'preprocess'), max_processes=max_processes)
+    preprocess_us3d(args.scene_path, os.path.join(args.scene_path, 'preprocess'), center_crop=args.center_crop, max_processes=max_processes)
 
     ## First time SFM
     run_sfm(os.path.join(args.scene_path, 'preprocess'), 
             reproj_err_threshold=[32.0, 2.0], 
-            mapper_ba_refine_principal_point=0,
+            mapper_ba_refine_principal_point=1,
             mapper_ba_refine_focal_length=0,
             global_ba_refine_principal_point=1,
             global_ba_refine_focal_length=0,
             global_ba_refine_extrinsics=0)
+    
+    all_cam_dict = json.load(open(os.path.join(args.scene_path, 'preprocess', 'cam_dict.json')))
+    for f, cam in all_cam_dict.items():
+        with open(os.path.join(args.scene_path, 'preprocess/cameras', f"{f}.json"), 'w') as fp:
+            json.dump(cam, fp, indent=2)
 
     cam_path = os.path.join(args.scene_path, 'preprocess/cameras')
     img_path = os.path.join(args.scene_path, 'preprocess/images')
@@ -177,13 +258,13 @@ if __name__ == '__main__':
         cam_path = skew_cam_path
         img_path = skew_img_path
     
-    if args.focal_correct:
-        print("Start focal Correct")
-        focal_cam_path = os.path.join(args.scene_path, 'focal_correct/cameras')
-        focal_img_path = os.path.join(args.scene_path, 'focal_correct/images')
-        run_focal_correct(img_path, cam_path, focal_img_path, focal_cam_path, max_processes=max_processes)
-        cam_path = focal_cam_path
-        img_path = focal_img_path
+    # if args.focal_correct:
+    #     print("Start focal Correct")
+    #     focal_cam_path = os.path.join(args.scene_path, 'focal_correct/cameras')
+    #     focal_img_path = os.path.join(args.scene_path, 'focal_correct/images')
+    #     run_focal_correct(img_path, cam_path, focal_img_path, focal_cam_path, max_processes=max_processes)
+    #     cam_path = focal_cam_path
+    #     img_path = focal_img_path
     
     ## geometric correction
     if args.rot_correct:
@@ -202,6 +283,7 @@ if __name__ == '__main__':
     with open(os.path.join(args.scene_path, 'cam_dict.json'), 'w') as fp:
         json.dump(all_cam_dict, fp, indent=2)
     
+    # copy images
     image_path = os.path.join(args.scene_path, 'images')
     if os.path.exists(image_path): shutil.rmtree(image_path)
     os.makedirs(image_path, exist_ok=True)
@@ -209,7 +291,7 @@ if __name__ == '__main__':
         orig_path = os.path.join(img_path, img)
         new_path = os.path.join(image_path, img)
         shutil.copy(orig_path, new_path)
-    
+
     # Run Sceond-time SFM
     run_sfm(args.scene_path, 
             reproj_err_threshold=[2.0, 1.0],
@@ -225,15 +307,17 @@ if __name__ == '__main__':
     new_cameras, new_images, new_points3D = {}, {}, {}
     list_zm, list_zM = [], []
 
-    if args.scale_scene:
-        enu_bbx = json.load(open(os.path.join(args.scene_path, 'preprocess/enu_bbx.json')))
-        scene_scale = np.sqrt(
-            (np.max(enu_bbx['e_minmax']) - np.min(enu_bbx['e_minmax'])) ** 2 +  \
-            (np.max(enu_bbx['n_minmax']) - np.min(enu_bbx['n_minmax'])) ** 2 +  \
-            (np.max(enu_bbx['u_minmax']) - np.min(enu_bbx['u_minmax'])) ** 2
-        )
-    else:
-        scene_scale = 1.0
+    # if args.scale_scene:
+    #     enu_bbx = json.load(open(os.path.join(args.scene_path, 'preprocess/enu_bbx.json')))
+    #     scene_scale = np.sqrt(
+    #         (np.max(enu_bbx['e_minmax']) - np.min(enu_bbx['e_minmax'])) ** 2 +  \
+    #         (np.max(enu_bbx['n_minmax']) - np.min(enu_bbx['n_minmax'])) ** 2 +  \
+    #         (np.max(enu_bbx['u_minmax']) - np.min(enu_bbx['u_minmax'])) ** 2
+    #     )
+    # else:
+    #     scene_scale = 1.0
+    scene_scale = 1.0
+
 
     # update point3d
     points = np.vstack([p.xyz for i,p in points3D.items()]) / scene_scale
@@ -276,68 +360,8 @@ if __name__ == '__main__':
     write_model(new_cameras, new_images, new_points3D, sparse_path, ".bin")
 
 
-    if True:
-        from utils.colmap_read_write_model import read_model, qvec2rotmat
-
-        camera, image, points = read_model(os.path.join(args.scene_path, 'sparse/0'))
-
-        image = [v for k,v in image.items()]
-        points = np.vstack([p.xyz for i,p in points.items()])
-
-        first_idx = np.random.randint(0, len(image))
-        img1 = image.pop(first_idx)
-        R1 = qvec2rotmat(img1.qvec)
-        t1 = img1.tvec.reshape((3,1))
-        cam1 = camera[img1.camera_id]
-        K1 = np.array([
-            [cam1.params[0], 0, cam1.params[2]],
-            [0, cam1.params[1], cam1.params[3]],
-            [0, 0, 1]])
-
-        second_idx = np.random.randint(0, len(image))
-        img2 = image[second_idx]
-        R2 = qvec2rotmat(img2.qvec)
-        t2 = img2.tvec.reshape((3,1))
-        cam2 = camera[img2.camera_id]
-        K2 = np.array([
-            [cam2.params[0], 0, cam2.params[2]],
-            [0, cam2.params[1], cam2.params[3]],
-            [0, 0, 1]])
+    # if True:
+    #     from utils.colmap_read_write_model import read_model, qvec2rotmat
+    #     cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/base'))
+    #     visualize_correspondence(images, cameras, points)
         
-        import imageio.v2 as imageio
-        img1 = imageio.imread(os.path.join(args.scene_path, 'images', img1.name))[:,:,:3]
-        img2 = imageio.imread(os.path.join(args.scene_path, 'images', img2.name))[:,:,:3]
-
-        X_cam = (R1 @ points.T + t1)  #(3,N)
-        uv = K1 @ X_cam
-        u1, v1 = uv[0,:]/uv[2,:], uv[1,:]/uv[2,:]
-
-        X_cam = (R2 @ points.T + t2)
-        uv = K2 @ X_cam
-        u2, v2 = uv[0,:]/uv[2,:], uv[1,:]/uv[2,:]
-
-        num = 50
-        idx = np.random.randint(0, len(u1), num)
-        u1, v1, u2, v2 = u1[idx], v1[idx], u2[idx], v2[idx]
-
-        if img1.shape[0] < img2.shape[0]:
-            img1 = np.pad(img1, ((0, img2.shape[0]-img1.shape[0]), (0, 0), (0, 0)))
-        if img1.shape[1] < img2.shape[1]:
-            img1 = np.pad(img1, ((0, 0), (0, img2.shape[1]-img1.shape[1]), (0, 0)))
-
-        img2 = np.pad(img2, ((0, img1.shape[0]-img2.shape[0]), (0, img1.shape[1]-img2.shape[1]), (0, 0)))
-        img = np.concatenate((img1, img2), axis=1)
-        w = img1.shape[1]
-
-        import matplotlib.pyplot as plt
-
-        plt.figure()
-        plt.imshow(img)
-        cmap = plt.get_cmap('jet')
-        for i in range(num):
-            x1 = u1[i]
-            y1 = v1[i]
-            x2 = u2[i]
-            y2 = v2[i]
-            plt.plot([x1, x2 + w], [y1, y2], '-+', color=cmap(i / (num - 1)), scalex=False, scaley=False)
-        plt.show()

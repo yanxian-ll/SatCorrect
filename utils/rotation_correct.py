@@ -53,10 +53,16 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     R_prime = R_delta @ R
     t_prime = R_delta @ t
 
-    K_prime = np.array([[fx, 0, w/2],
-                        [0, fy, h/2],
-                        [0,  0,  1]])
     ## TODO: adaptive adjust fx & fy
+    new_fx = math.sqrt(fx*fx + (w/2-cx)*(w/2-cx))
+    new_fy = math.sqrt(fy*fy + (h/2-cy)*(h/2-cy))
+
+    new_fx = fx
+    new_fy = fy
+
+    K_prime = np.array([[new_fx, 0, w/2],
+                        [0, new_fy, h/2],
+                        [0,  0,  1]])
     
     new_K = np.eye(4)
     new_K[:3, :3] = K_prime
@@ -127,9 +133,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser("Test")
-    parser.add_argument("--cam_file", default="data/JAX_214/skew_correct/cameras/JAX_214_001_RGB.json")
-    parser.add_argument("--img_file", default="data/JAX_214/skew_correct/images/JAX_214_001_RGB.png")
-    parser.add_argument("--points_file", default="data/JAX_214/sparse/0/points3D.txt")
+    parser.add_argument("--cam_file", default="data/JAX_068/skew_correct/cameras/JAX_068_001_RGB.json")
+    parser.add_argument("--img_file", default="data/JAX_068/skew_correct/images/JAX_068_001_RGB.png")
+    parser.add_argument("--points_file", default="data/JAX_068/sparse/base/points3D.txt")
     parser.add_argument("--output_path", default="./test_output")
     args = parser.parse_args()
 
