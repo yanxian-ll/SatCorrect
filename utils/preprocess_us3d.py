@@ -188,6 +188,7 @@ def preprocess_us3d(scene_path, output_path=None, center_crop=False, max_process
 
     bbox_file = [os.path.join(scene_path, f) for f in os.listdir(scene_path) if f.endswith('_DSM.txt')][0]
     dsm_file = [os.path.join(scene_path, f) for f in os.listdir(scene_path) if f.endswith('_DSM.tif')][0]
+    dsm_mask_file = [os.path.join(scene_path, f) for f in os.listdir(scene_path) if f.endswith('_CLS.tif')][0]
     assert (bbox_file is not None) and (dsm_file is not None)
 
     if output_path is None:
@@ -272,14 +273,16 @@ def preprocess_us3d(scene_path, output_path=None, center_crop=False, max_process
     with rasterio.open(dsm_file, "r") as f:
         profile = f.profile
     
-    with rasterio.open(os.path.join(output_path, "enu_DSM.ply"),  "w", **profile) as f:
+    with rasterio.open(os.path.join(output_path, "enu_DSM.tif"),  "w", **profile) as f:
         enu_dsm = enu_u.reshape(pixels, pixels)
         f.write(enu_dsm, 1)
     
+    shutil.copy2(dsm_mask_file, os.path.join(output_path, "enu_CLS.tif"))
+    
     with open(os.path.join(output_path, "enu_DSM.txt"), 'w') as f:
         min_e = np.min(enu_e)
-        max_n = np.max(enu_n)
-        f.write(f"{min_e}\n{max_n}\n{pixels}\n{gsd}")
+        min_n = np.min(enu_n)
+        f.write(f"{min_e}\n{min_n}\n{pixels}\n{gsd}")
 
     ## init
     os.makedirs(os.path.join(output_path, 'metas'), exist_ok=True)

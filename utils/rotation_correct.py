@@ -57,8 +57,8 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
     new_fx = math.sqrt(fx*fx + (w/2-cx)*(w/2-cx))
     new_fy = math.sqrt(fy*fy + (h/2-cy)*(h/2-cy))
 
-    new_fx = fx
-    new_fy = fy
+    # new_fx = fx
+    # new_fy = fy
 
     K_prime = np.array([[new_fx, 0, w/2],
                         [0, new_fy, h/2],
@@ -92,10 +92,27 @@ def rotation_correct(cam_file, img_file, out_cam_file, out_img_file, center_crop
         col_margin = max(int(left+0.5), int(w-right+0.5))
 
         warped_image = warped_image[row_margin:h-row_margin, col_margin:w-col_margin, :]
+
         cam_dict['img_size'] = [int(warped_image.shape[1]), int(warped_image.shape[0])]
         new_K[0, 2] -= col_margin
         new_K[1, 2] -= row_margin
         cam_dict['K'] = new_K.flatten().tolist()
+
+
+        # for keep image size 
+        m = min(warped_image.shape[0], warped_image.shape[1])
+        scale = 800.0 / m
+        w, h = int(warped_image.shape[1] * scale), int(warped_image.shape[0] * scale)
+        warped_image = cv2.resize(warped_image, (w,h))
+
+        cam_dict['img_size'] = [int(warped_image.shape[1]), int(warped_image.shape[0])]
+        new_K[0, 0] *= scale
+        new_K[1, 1] *= scale
+        new_K[0, 2] = w / 2.0
+        new_K[1, 2] = h / 2.0
+        cam_dict['K'] = new_K.flatten().tolist()
+
+        
     else:
         warped_image = np.concatenate([warped_image, warped_mask[:,:,None]], axis=-1)
     # save

@@ -205,21 +205,20 @@ if __name__ == '__main__':
     parser.add_argument('--scene_path', type=str, default="data/JAX_004", help='Folder containing input data.')
     parser.add_argument('--center_crop', action='store_false')
     parser.add_argument('--skew_correct', action='store_false')
-    parser.add_argument('--focal_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
     parser.add_argument('--max_processes', type=int, default=-1)
     args = parser.parse_args()
+    
+    # if True:
+    #     from utils.colmap_read_write_model import read_model, qvec2rotmat
+    #     cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/base'))
+    #     visualize_correspondence(images, cameras, points)
+        
 
     if args.max_processes <= 0:
         max_processes = multiprocessing.cpu_count()
     else:
         max_processes = args.max_processes
-    
-
-    if True:
-        from utils.colmap_read_write_model import read_model, qvec2rotmat
-        cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/0'))
-        visualize_correspondence(images, cameras, points)
 
     for f in os.listdir(args.scene_path):
         if f=='input' or f.endswith('_CLS.tif') or f.endswith('_DSM.tif') or f.endswith('_DSM.txt'):
