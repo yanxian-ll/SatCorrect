@@ -202,7 +202,7 @@ def visualize_correspondence(images, cameras, points):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--scene_path', type=str, default="data/JAX_004", help='Folder containing input data.')
+    parser.add_argument('--scene_path', type=str, default="data/OMA_042", help='Folder containing input data.')
     parser.add_argument('--center_crop', action='store_false')
     parser.add_argument('--skew_correct', action='store_false')
     parser.add_argument('--rot_correct', action='store_false')
@@ -359,8 +359,8 @@ if __name__ == '__main__':
     write_model(new_cameras, new_images, new_points3D, sparse_path, ".bin")
 
 
-    # if True:
-    #     from utils.colmap_read_write_model import read_model, qvec2rotmat
-    #     cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/base'))
-    #     visualize_correspondence(images, cameras, points)
+    if True:
+        from utils.colmap_read_write_model import read_model, qvec2rotmat
+        cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/base'))
+        visualize_correspondence(images, cameras, points)
         

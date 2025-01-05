@@ -244,6 +244,7 @@ def preprocess_us3d(scene_path, output_path=None, center_crop=False, max_process
         image_path = os.path.join(scene_path, 'input')
 
     lat, lon = eastnorth_to_latlon(utm_e, utm_n, zone_number=zone_number, hemisphere=hemisphere)
+
     enu_e, enu_n, enu_u = latlonalt_to_enu(lat, lon, dsm, ENU_lat, ENU_lon, ENU_alt)
 
     enu_bbx = {
