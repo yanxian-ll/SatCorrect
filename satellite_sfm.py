@@ -1,3 +1,19 @@
+"""
+Satellite Structure from Motion (SfM) Pipeline
+
+This module implements a complete SfM pipeline for satellite imagery, including:
+- Initial feature extraction and matching
+- Camera parameter estimation
+- Multi-stage bundle adjustment
+- Geometric correction (skew, rotation)
+- Visualization tools
+
+Key components:
+- run_sfm(): Main SfM pipeline
+- visualize_correspondence(): Visualization of feature matches
+- Geometric correction functions
+"""
+
 import os
 import json
 import argparse
@@ -22,14 +38,29 @@ def run_sfm(scene_path,
             global_ba_refine_principal_point=1,
             global_ba_refine_focal_length=0,
             global_ba_refine_extrinsics=0):
-
     """
-    --input scene path
-        --images
-        --cam_dict.json
-        --sparse/0
-        --database.db
+    Run the complete SfM pipeline for satellite images.
 
+    Args:
+        scene_path (str): Path to scene directory containing:
+            - images/: Input images
+            - cam_dict.json: Camera parameters
+            - sparse/0: Initial reconstruction
+            - database.db: Feature database
+        
+        reproj_err_threshold (list): Reprojection error thresholds for different stages
+        mapper_ba_refine_principal_point (int): Refine principal point in mapper BA
+        mapper_ba_refine_focal_length (int): Refine focal length in mapper BA 
+        global_ba_refine_principal_point (int): Refine principal point in global BA
+        global_ba_refine_focal_length (int): Refine focal length in global BA
+        global_ba_refine_extrinsics (int): Refine extrinsics in global BA
+
+    Pipeline steps:
+    1. Feature extraction using COLMAP
+    2. Feature matching
+    3. Initial triangulation
+    4. Bundle adjustment
+    5. Camera parameter refinement
     """
     remote_scene_path = '/workspace'
     COLMAP_BIN = f"docker run -it --rm --gpus all -u $(id -u):$(id -g) \
@@ -139,6 +170,20 @@ def run_sfm(scene_path,
 
 
 def visualize_correspondence(images, cameras, points):
+    """
+    Visualize feature correspondences between two randomly selected images.
+
+    Args:
+        images (dict): Dictionary of Image objects from COLMAP model
+        cameras (dict): Dictionary of Camera objects from COLMAP model
+        points (dict): Dictionary of Point3D objects from COLMAP model
+
+    Displays:
+        Matplotlib plot showing:
+        - Two images side by side
+        - Random sample of feature matches between them
+        - Lines connecting corresponding features
+    """
     images = [v for k,v in images.items()]
     points = np.vstack([p.xyz for i,p in points.items()])
     
@@ -363,4 +408,3 @@ if __name__ == '__main__':
         from utils.colmap_read_write_model import read_model, qvec2rotmat
         cameras, images, points = read_model(os.path.join(args.scene_path, 'sparse/base'))
         visualize_correspondence(images, cameras, points)
-        

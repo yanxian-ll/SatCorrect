@@ -1,0 +1,38 @@
+FROM nvidia/cuda:11.1.1-base-ubuntu18.04 as builder
+
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    gcc-6 g++-6 \
+    build-essential \
+    libboost-program-options-dev \
+    libboost-filesystem-dev \
+    libboost-graph-dev \
+    libboost-regex-dev \
+    libboost-system-dev \
+    libboost-test-dev \
+    libeigen3-dev \
+    libsuitesparse-dev \
+    libfreeimage-dev \
+    libgoogle-glog-dev \
+    libgflags-dev \
+    libglew-dev \
+    qtbase5-dev \
+    libqt5opengl5-dev \
+    libcgal-dev \
+    libatlas-base-dev \
+    nvidia-cuda-toolkit \
+    libceres-dev  \
+    && rm -rf /var/lib/apt/lists/*
+
+
+RUN git clone https://github.com/Kai-46/ColmapForVisSat && \
+    cd ColmapForVisSat && mkdir build && cd build && \
+    export CC=/usr/bin/gcc-6 && \
+    export CXX=/usr/bin/g++-6 && \
+    cmake .. && \
+    make -j$(nproc) && \
+    make install
+
+ENTRYPOINT ["colmap"]
+CMD ["--help"]

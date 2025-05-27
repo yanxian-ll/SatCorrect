@@ -1,3 +1,20 @@
+"""
+RPC to Affine Camera Model Conversion
+
+This module converts Rational Polynomial Camera (RPC) models to affine camera models
+for satellite imagery. It handles:
+- RPC parameter extraction from metadata
+- Coordinate system transformations (lat/lon to UTM)
+- Affine camera model estimation
+- Sun position and view direction calculations
+
+Key functions:
+- _process_single_image: Main processing pipeline for single image
+- _generate_samples: Generate sample points for projection matrix estimation
+- _solve_projection_matrix: Solve camera projection matrix from correspondences
+- _factorize_projection_matrix: Factorize projection matrix into K, R, t
+"""
+
 import argparse
 import os
 import tifffile
@@ -32,6 +49,22 @@ def latlon_to_utm(lat, lon, zone_number=None):
 
 
 def read_tif_and_info(tiff_fpath, rpc_file):
+    """
+    Read TIFF image and extract metadata including RPC parameters.
+
+    Args:
+        tiff_fpath (str): Path to input TIFF file
+        rpc_file (str): Path to JSON file containing RPC parameters
+
+    Returns:
+        tuple: (image_data, meta_dict) where:
+            image_data: Numpy array of image data (H,W,3)
+            meta_dict: Dictionary containing:
+                - rpc: RPC parameters
+                - height/width: Image dimensions
+                - capture_date: Image capture timestamp
+                - sun_elevation/azimuth: Sun position angles
+    """
     dataset = gdal.Open(tiff_fpath, gdal.GA_ReadOnly)
     img = dataset.ReadAsArray()
     assert (len(img.shape) == 3 and img.shape[0] == 3)
@@ -231,6 +264,24 @@ def sunview_2_w2c(sun_view, sun_position):
 def _process_single_image(image_file, rpc_file, output_path, lat_minmax, lon_minmax, alt_minmax, translation, scales, 
     world_points=None  # for test
 ):
+    """
+    Process a single satellite image to convert RPC model to affine camera model.
+
+    Args:
+        image_file (str): Path to input image file
+        rpc_file (str): Path to RPC parameters file
+        output_path (str): Directory to save processed outputs
+        lat_minmax (list): [min, max] latitude bounds
+        lon_minmax (list): [min, max] longitude bounds  
+        alt_minmax (list): [min, max] altitude bounds
+        translation (np.array): ENU coordinate system origin
+        scales (np.array): Scaling factors for normalization
+        world_points (np.array, optional): Ground truth points for validation
+
+    Outputs:
+        - Processed image in output_path/images/
+        - Camera parameters JSON in output_path/cameras/
+    """
     img, meta_dict = read_tif_and_info(image_file, rpc_file)
 
     image_height, image_width = img.shape[:2]
@@ -434,4 +485,3 @@ if __name__ == '__main__':
     #         pool.apply_async(_process_single_image, args=(img_file, rpc_file, output_path, lat_minmax, lon_minmax, alt_minmax, translation, scales))
     #     pool.close()
     #     pool.join()
-    
